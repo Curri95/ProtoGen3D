@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@theme {
+  --color-industrial-900: #F8FAFC;
+  --color-industrial-800: #FFFFFF;
+  --color-industrial-700: #E2E8F0;
+  --color-industrial-600: #CBD5E1;
+  --color-industrial-500: #64748B;
+  --color-industrial-accent: #FF5722;
+  --color-industrial-accent-hover: #E64A19;
+  
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'Roboto Mono', monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-slate-50 text-slate-800 selection:bg-industrial-accent selection:text-white;
+  }
+}
+
+@layer components {
+  .section-padding {
+    @apply py-20 md:py-32 px-6 md:px-12 max-w-7xl mx-auto;
+  }
+  .tech-border {
+    @apply border border-slate-200 bg-white shadow-xs;
+  }
+  .btn-primary {
+    @apply bg-industrial-accent hover:bg-industrial-accent-hover text-white px-6 py-3 rounded-none font-semibold transition-colors duration-200 inline-flex items-center justify-center shadow-xs;
+  }
+  .btn-secondary {
+    @apply bg-white border border-slate-300 hover:border-industrial-accent hover:text-industrial-accent text-slate-800 px-6 py-3 rounded-none font-semibold transition-colors duration-200 inline-flex items-center justify-center shadow-xs;
+  }
+  .heading-xl {
+    @apply text-4xl md:text-6xl font-bold tracking-tight text-slate-900;
+  }
+  .heading-lg {
+    @apply text-3xl md:text-4xl font-bold tracking-tight text-slate-900;
+  }
+  .tech-mono {
+    @apply font-mono text-sm tracking-wider text-slate-500;
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Nexus Fab - Industrial Prototyping",
+  "description": "B2B platform for high-precision additive and subtractive manufacturing services.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
