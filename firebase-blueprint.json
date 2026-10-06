@@ -1,0 +1,132 @@
+{
+  "entities": {
+    "QuoteRequest": {
+      "title": "QuoteRequest",
+      "description": "Industrial manufacturing quote request and DFM analysis",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the quote"
+        },
+        "ticketNumber": {
+          "type": "string",
+          "description": "Engineering tracking ticket (e.g., #PROT-8492)",
+          "maxLength": 32
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the requesting client"
+        },
+        "company": {
+          "type": "string",
+          "description": "Client company or R&D department",
+          "maxLength": 150
+        },
+        "email": {
+          "type": "string",
+          "description": "Corporate contact email",
+          "maxLength": 150
+        },
+        "technology": {
+          "type": "string",
+          "description": "Manufacturing technology selected",
+          "maxLength": 80
+        },
+        "material": {
+          "type": "string",
+          "description": "Material or technical alloy",
+          "maxLength": 80
+        },
+        "surfaceFinish": {
+          "type": "string",
+          "description": "Surface finishing / post-processing selected",
+          "maxLength": 100
+        },
+        "quantity": {
+          "type": "number",
+          "description": "Number of parts requested"
+        },
+        "slaSpeed": {
+          "type": "string",
+          "description": "SLA manufacturing turnaround time",
+          "maxLength": 50
+        },
+        "status": {
+          "type": "string",
+          "description": "Plant lifecycle status of the order",
+          "enum": ["received", "dfm_review", "in_production", "qc_cmm", "shipped"]
+        },
+        "autoDfmCompensation": {
+          "type": "boolean",
+          "description": "Whether customer authorized preventive +0.2mm DFM compensation"
+        },
+        "fileNames": {
+          "type": "string",
+          "description": "Names of CAD models submitted",
+          "maxLength": 500
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional engineering notes or critical tolerances",
+          "maxLength": 1000
+        },
+        "syncedToSheets": {
+          "type": "boolean",
+          "description": "Whether the quote was recorded into the Google Sheet"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of submission"
+        }
+      },
+      "required": ["ticketNumber", "company", "email", "technology", "material", "quantity", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and organization metadata",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID"
+        },
+        "email": {
+          "type": "string",
+          "description": "User primary email address",
+          "maxLength": 150
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Full name or corporate handle",
+          "maxLength": 120
+        },
+        "company": {
+          "type": "string",
+          "description": "Company name",
+          "maxLength": 150
+        },
+        "role": {
+          "type": "string",
+          "description": "Role in ProtoGen3D platform",
+          "enum": ["client", "admin"]
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Account creation timestamp"
+        }
+      },
+      "required": ["userId", "email", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/quotes/{quoteId}": {
+      "schema": "QuoteRequest",
+      "description": "Stores all manufacturing quotes and CAD inspection tickets"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Stores user profiles and permissions"
+    }
+  }
+}

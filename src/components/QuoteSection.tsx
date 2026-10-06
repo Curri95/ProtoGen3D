@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { 
   UploadCloud, 
@@ -11,24 +11,27 @@ import {
   FileText, 
   ArrowRight, 
   Clock, 
-  ShieldCheck,
-  RefreshCw,
-  AlertTriangle,
-  Info,
-  Sparkles,
-  Layers,
-  Wrench,
-  Maximize2,
-  Minimize2,
-  Box,
-  Flame,
-  FileCheck,
-  Calendar,
-  DollarSign,
-  TrendingDown
+  ShieldCheck, 
+  RefreshCw, 
+  AlertTriangle, 
+  Info, 
+  Sparkles, 
+  Layers, 
+  Wrench, 
+  Box, 
+  Flame, 
+  FileCheck, 
+  ExternalLink,
+  Mail,
+  Table,
+  Database
 } from 'lucide-react';
 import CadViewer3D from './CadViewer3D';
 import NdaModal from './NdaModal';
+import GmailConfirmationModal from './GmailConfirmationModal';
+import { useAuth } from '../context/AuthContext';
+import { saveQuoteToFirestore } from '../lib/firebase';
+import { getOrCreateQuotesSpreadsheet, appendQuoteToSheet, QuotePayload } from '../lib/workspace';
 
 interface SurfaceFinish {
   id: string;
@@ -136,6 +139,8 @@ const SLA_OPTIONS = [
 ];
 
 export default function QuoteSection() {
+  const { user, accessToken, signInWithGoogle } = useAuth();
+
   const [files, setFiles] = useState<File[]>([]);
   const [sampleLoaded, setSampleLoaded] = useState(false);
   const [technology, setTechnology] = useState('Mecanizado CNC');
@@ -154,10 +159,19 @@ export default function QuoteSection() {
   // NDA modal state
   const [isNdaModalOpen, setIsNdaModalOpen] = useState(false);
 
+  // Gmail modal state
+  const [isGmailModalOpen, setIsGmailModalOpen] = useState(false);
+  const [gmailSentSuccess, setGmailSentSuccess] = useState(false);
+
+  // Google Sheets sync state
+  const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(null);
+  const [savedInFirestore, setSavedInFirestore] = useState(false);
+
   // Submission & loading state
   const [status, setStatus] = useState<'idle' | 'loading' | 'confirmed'>('idle');
   const [loadingText, setLoadingText] = useState('Verificando geometría CAD...');
   const [ticketNumber, setTicketNumber] = useState('#PROT-8492');
+  const [confirmedPayload, setConfirmedPayload] = useState<QuotePayload | null>(null);
   const [confirmedData, setConfirmedData] = useState<{
     company: string;
     email: string;
@@ -173,6 +187,16 @@ export default function QuoteSection() {
     autoDfm: boolean;
   } | null>(null);
   const [copiedTicket, setCopiedTicket] = useState(false);
+
+  // Prefill email and company if user is authenticated
+  useEffect(() => {
+    if (user?.email && !email) {
+      setEmail(user.email);
+    }
+    if (user?.displayName && !company) {
+      setCompany(`${user.displayName} (I+D)`);
+    }
+  }, [user]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles(prev => [...prev, ...acceptedFiles]);
@@ -218,10 +242,10 @@ export default function QuoteSection() {
     }, 700);
 
     const timer2 = setTimeout(() => {
-      setLoadingText('Simulando tiempos de mecanizado, post-procesado y asignando celda...');
+      setLoadingText('Sincronizando con Google Workspace y Firebase Firestore...');
     }, 1400);
 
-    const timer3 = setTimeout(() => {
+    const timer3 = setTimeout(async () => {
       const generatedTicket = `#PROT-${Math.floor(1000 + Math.random() * 9000)}`;
       const now = new Date();
       const formattedDate = `${now.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })} - ${now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
@@ -232,10 +256,65 @@ export default function QuoteSection() {
           ? ['carcasa_valvula_colector.step'] 
           : ['modelo_tecnico_param.step'];
 
+      const quotePayload: QuotePayload = {
+        ticketNumber: generatedTicket,
+        company: company || (user?.displayName ? `${user.displayName} (I+D)` : 'Empresa de I+D'),
+        email: email || user?.email || 'ingenieria@cliente.com',
+        technology,
+        material,
+        surfaceFinish: selectedFinishObj.name,
+        quantity,
+        slaSpeed: `${selectedSlaObj.time} (${selectedSlaObj.name})`,
+        autoDfm: autoDfmCompensation,
+        fileNames: currentFiles.join(', '),
+        notes: comments,
+        date: formattedDate,
+      };
+
+      setConfirmedPayload(quotePayload);
+
+      // 1. Save to Firebase Firestore
+      if (user) {
+        try {
+          await saveQuoteToFirestore({
+            id: `quote_${Date.now()}`,
+            ticketNumber: generatedTicket,
+            userId: user.uid,
+            company: quotePayload.company,
+            email: quotePayload.email,
+            technology,
+            material,
+            surfaceFinish: selectedFinishObj.name,
+            quantity,
+            slaSpeed: selectedSlaObj.time,
+            status: 'received',
+            autoDfmCompensation,
+            fileNames: quotePayload.fileNames,
+            notes: comments,
+            syncedToSheets: !!accessToken,
+            createdAt: new Date().toISOString(),
+          });
+          setSavedInFirestore(true);
+        } catch (err) {
+          console.warn("Error saving to Firestore:", err);
+        }
+      }
+
+      // 2. Synchronize to Google Sheets if access token available
+      if (accessToken) {
+        try {
+          const sheetInfo = await getOrCreateQuotesSpreadsheet(accessToken);
+          await appendQuoteToSheet(accessToken, sheetInfo.id, quotePayload);
+          setSpreadsheetUrl(sheetInfo.url);
+        } catch (err) {
+          console.warn("Google Sheets synchronization error:", err);
+        }
+      }
+
       setTicketNumber(generatedTicket);
       setConfirmedData({
-        company: company || 'Empresa de I+D',
-        email: email || 'ingenieria@cliente.com',
+        company: quotePayload.company,
+        email: quotePayload.email,
         technology,
         material,
         surfaceFinishName: selectedFinishObj.name,
@@ -245,7 +324,7 @@ export default function QuoteSection() {
         fileCount: currentFiles.length,
         fileNames: currentFiles,
         date: formattedDate,
-        autoDfm: autoDfmCompensation
+        autoDfm: autoDfmCompensation,
       });
       setStatus('confirmed');
     }, 2100);
@@ -276,6 +355,9 @@ export default function QuoteSection() {
     setCompany('');
     setEmail('');
     setComments('');
+    setSpreadsheetUrl(null);
+    setSavedInFirestore(false);
+    setGmailSentSuccess(false);
     setLoadingText('Verificando geometría CAD...');
   };
 
@@ -288,6 +370,10 @@ Fecha de Registro: ${confirmedData?.date || 'N/A'}
 Compromiso SLA de Respuesta: < 2 Horas Laborables
 Plazo de Entrega Acordado: ${confirmedData?.slaTime} (${confirmedData?.slaSpeedName})
 Protocolo de Seguridad: Custodia NDA Bilateral Activo
+
+INTEGRACIONES EN TIEMPO REAL:
+• Base de Datos Firebase Firestore: ${savedInFirestore ? 'Expediente persistido con trazabilidad en vivo' : 'No conectado'}
+• Google Sheets ERP: ${spreadsheetUrl ? `Sincronizado (${spreadsheetUrl})` : 'Pendiente de inicio de sesión'}
 
 DATOS DEL CLIENTE / DEPARTAMENTO I+D:
 Empresa: ${confirmedData?.company || 'N/A'}
@@ -334,13 +420,35 @@ Contacto Técnico de Ingeniería: ingenieria@protogen3d.com
       <div className="section-padding">
         <div className="max-w-4xl mx-auto">
           
-          <div className="text-center mb-12">
+          <div className="text-center mb-10">
             <span className="tech-mono text-industrial-accent mb-4 block">// PORTAL B2B PROTOGEN3D</span>
             <h2 className="heading-lg mb-4">Cotización & Validación Inmediata</h2>
             <p className="text-slate-600 max-w-2xl mx-auto">
-              Sube tus modelos CAD, visualiza la geometría en 3D en tiempo real con detección de espesores críticos, configura post-procesados y solicita fabricación con plazos certificados.
+              Sube tus modelos CAD, visualiza la geometría en 3D en tiempo real con detección de espesores críticos, configura post-procesados y gestiona tu expediente con Google Workspace y Firebase.
             </p>
           </div>
+
+          {/* Quick Integration Banner if not logged in */}
+          {!user && (
+            <div className="mb-8 p-4 bg-white border border-slate-300 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0">
+                  <Database className="w-4 h-4 text-blue-600" />
+                </div>
+                <p className="text-xs text-slate-700">
+                  <strong>Integración activa:</strong> Inicia sesión con Google para sincronizar tus pedidos en <strong>Google Sheets</strong>, recibir el acuse por <strong>Gmail</strong> y monitorizar la fabricación en vivo en <strong>Firebase</strong>.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={signInWithGoogle}
+                className="shrink-0 text-xs font-mono px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-800 font-semibold flex items-center gap-1.5 transition-colors"
+              >
+                <span>Conectar Google</span>
+              </button>
+            </div>
+          )}
 
           {/* Condition: Confirmed Screen vs Form Screen */}
           {status === 'confirmed' ? (
@@ -386,6 +494,59 @@ Contacto Técnico de Ingeniería: ingenieria@protogen3d.com
                     )}
                   </button>
                 </div>
+              </div>
+
+              {/* Real-time Workspace & Firebase Integration Badges */}
+              <div className="my-6 p-4 bg-slate-50 border border-slate-200 space-y-2.5">
+                <span className="block text-xs font-mono text-slate-500 font-bold uppercase tracking-wider">
+                  // ESTADO DE INTEGRACIONES EN LA NUBE
+                </span>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
+                  {/* Firebase Firestore Status */}
+                  <div className="p-3 bg-white border border-slate-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Database className="w-4 h-4 text-orange-500" />
+                      <span>Firebase Firestore:</span>
+                    </div>
+                    {savedInFirestore ? (
+                      <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5" /> Registrado en vivo
+                      </span>
+                    ) : (
+                      <span className="text-slate-500">Sesión anónima</span>
+                    )}
+                  </div>
+
+                  {/* Google Sheets Status */}
+                  <div className="p-3 bg-white border border-slate-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Table className="w-4 h-4 text-emerald-600" />
+                      <span>Google Sheets:</span>
+                    </div>
+                    {spreadsheetUrl ? (
+                      <a 
+                        href={spreadsheetUrl} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="text-emerald-700 hover:underline font-semibold flex items-center gap-1"
+                      >
+                        <span>Abrir Hoja</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <span className="text-slate-500">No vinculado</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Gmail confirmation notice */}
+                {gmailSentSuccess && (
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-xs font-mono text-emerald-800 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Acuse formal enviado con éxito a tu bandeja de correo mediante Gmail API.</span>
+                  </div>
+                )}
               </div>
 
               {/* Ticket Details Grid */}
@@ -462,24 +623,46 @@ Contacto Técnico de Ingeniería: ingenieria@protogen3d.com
               </div>
 
               {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={downloadReceipt}
-                  className="btn-secondary w-full sm:w-auto text-sm py-2.5 px-5 flex items-center justify-center gap-2"
-                >
-                  <FileText className="w-4 h-4 text-slate-600" />
-                  Descargar Comprobante (.TXT)
-                </button>
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-200 flex-wrap">
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={downloadReceipt}
+                    className="btn-secondary w-full sm:w-auto text-xs py-2.5 px-4 flex items-center justify-center gap-2"
+                  >
+                    <FileText className="w-4 h-4 text-slate-600" />
+                    Descargar (.TXT)
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="btn-primary w-full sm:w-auto text-sm py-2.5 px-6 flex items-center justify-center gap-2"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  Enviar Otra Solicitud
-                </button>
+                  {accessToken && !gmailSentSuccess && (
+                    <button
+                      type="button"
+                      onClick={() => setIsGmailModalOpen(true)}
+                      className="px-4 py-2.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-mono flex items-center gap-2 transition-colors shadow-2xs"
+                    >
+                      <Mail className="w-4 h-4 text-industrial-accent" />
+                      <span>Enviar Acuse con Gmail</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <a
+                    href="#portal-b2b"
+                    className="w-full sm:w-auto text-xs font-mono text-slate-700 hover:text-industrial-accent underline text-center"
+                  >
+                    Ver en Portal B2B ➔
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="btn-primary w-full sm:w-auto text-xs py-2.5 px-5 flex items-center justify-center gap-2"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Nueva Solicitud
+                  </button>
+                </div>
               </div>
 
             </div>
@@ -556,7 +739,7 @@ Contacto Técnico de Ingeniería: ingenieria@protogen3d.com
                 )}
               </div>
 
-              {/* 2. APARTADO 1: Validación Geométrica Automática con Visor CAD 3D Interactivo (WebGL Three.js) */}
+              {/* 2. Validación Geométrica con Visor CAD 3D Interactivo */}
               {hasFilesOrSample && (
                 <div className="bg-slate-50 border-2 border-slate-300 p-5 md:p-6 shadow-xs animate-fade-in space-y-4">
                   
@@ -773,7 +956,7 @@ Contacto Técnico de Ingeniería: ingenieria@protogen3d.com
                 </div>
               </div>
 
-              {/* 4. APARTADO 3: Configurador de Post-Procesados & Acabados Superficiales (Surface Finishing) */}
+              {/* 4. Configurador de Post-Procesados */}
               <div className="border border-slate-200 bg-slate-50/60 p-5 md:p-6 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 gap-2">
                   <div>
@@ -849,7 +1032,7 @@ Contacto Técnico de Ingeniería: ingenieria@protogen3d.com
 
               </div>
 
-              {/* 5. APARTADO 3 (Continuación): Cantidad / Tiers de Preserie & Plazo SLA Exprés */}
+              {/* 5. Cantidad / Tiers de Preserie & Plazo SLA Exprés */}
               <div className="border border-slate-200 bg-slate-50/60 p-5 md:p-6 space-y-4">
                 
                 <div className="flex items-center justify-between pb-3 border-b border-slate-200">
@@ -1001,7 +1184,7 @@ Contacto Técnico de Ingeniería: ingenieria@protogen3d.com
                   </>
                 ) : (
                   <>
-                    <span>Solicitar Cotización & Validación Geométrica</span>
+                    <span>Solicitar Cotización & Registrar Expediente</span>
                     <ArrowRight className="w-5 h-5" />
                   </>
                 )}
@@ -1022,6 +1205,17 @@ Contacto Técnico de Ingeniería: ingenieria@protogen3d.com
         onClose={() => setIsNdaModalOpen(false)}
         defaultCompany={company}
       />
+
+      {/* Gmail Official Confirmation Modal */}
+      {confirmedPayload && accessToken && (
+        <GmailConfirmationModal
+          isOpen={isGmailModalOpen}
+          onClose={() => setIsGmailModalOpen(false)}
+          quote={confirmedPayload}
+          accessToken={accessToken}
+          onSuccess={() => setGmailSentSuccess(true)}
+        />
+      )}
 
     </section>
   );
